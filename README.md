@@ -8,7 +8,7 @@ Clone this repo into a virtual environment
 In terminal, install requirements
 "pip3 install -r requirements.txt"
 
-In line 5+6 of the code, replace your model path with whatever model you are currently using
+In line 6+7 of the code, replace your model path with whatever model you are currently using
 
 MODEL_PATH  = "/Users/x/Downloads/Qwen2-VL-7B-Instruct-Q4_K_M.gguf"
 
