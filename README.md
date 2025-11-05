@@ -11,6 +11,7 @@ In terminal, install requirements
 In line 5+6 of the code, replace your model path with whatever model you are currently using
 
 MODEL_PATH  = "/Users/x/Downloads/Qwen2-VL-7B-Instruct-Q4_K_M.gguf"
+
 MMPROJ_PATH = "/Users/x/Downloads/mmproj-Qwen2-VL-7B-Instruct-f16.gguf"
 
 https://huggingface.co/meta-llama
