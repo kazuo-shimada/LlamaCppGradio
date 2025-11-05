@@ -8,10 +8,12 @@ Clone this repo into a virtual environment
 In terminal, install requirements
 "pip3 install -r requirements.txt"
 
-In line 6 of the code, replace your model path with whatever model you are currently using
-"model_path = "/Qwen2-VL-7B-Instruct-Q4_K_M.gguf"   # Replace with your model's path"
+In line 5+6 of the code, replace your model path with whatever model you are currently using
 
-Replace </Qwen2-VL-7B-Instruct-Q4_K_M.gguf> with whatever model it is that you are using (link with many llama models below provided)
+MODEL_PATH  = "/Users/x/Downloads/Qwen2-VL-7B-Instruct-Q4_K_M.gguf"
+MMPROJ_PATH = "/Users/x/Downloads/mmproj-Qwen2-VL-7B-Instruct-f16.gguf"
+
 https://huggingface.co/meta-llama
+Use whatever model and mmproj of your choosing
 
 Run the program and follow available open port for a localhost server
