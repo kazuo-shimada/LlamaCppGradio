@@ -3,7 +3,7 @@ import gradio as gr
 from llama_cpp import Llama
 
 # 1. Load the Llama Model
-model_path = "EdgeRunner-Light-Q4_K_M.gguf"   # Replace with your model's path
+model_path = "Qwen2-VL-7B-Instruct-Q4_K_M.gguf"   # Replace with your model's path
 llm = Llama(model_path=model_path, n_ctx=2048)  # Adjust n_ctx as needed
 
 # 2. Define the Gradio Interface
