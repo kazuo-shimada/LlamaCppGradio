@@ -29,25 +29,25 @@ It automatically launches a Gradio interface in your web browser for chatting an
 
 Step 1 — Clone this repository
 
-git clone https://github.com/yourusername/llama-gradio-ui.git
-cd llama-gradio-ui
+	git clone https://github.com/yourusername/llama-gradio-ui.git
+	cd llama-gradio-ui
 
 
 Step 2 — Create and activate a virtual environment
 
-python3 -m venv .venv
-source .venv/bin/activate
+	python3 -m venv .venv
+	source .venv/bin/activate
 
 
 Step 3 — Install dependencies
 
-pip install --upgrade pip
-pip install -r requirements.txt
+	pip install --upgrade pip
+	pip install -r requirements.txt
 
 Note for Apple Silicon users:
 To enable GPU acceleration with Metal, install llama-cpp-python like this:
 
-CMAKE_ARGS="-DLLAMA_METAL=on" pip install --force-reinstall llama-cpp-python
+	CMAKE_ARGS="-DLLAMA_METAL=on" pip install --force-reinstall llama-cpp-python
 
 
 🧩 Step 4 — Download a Model and Projector
@@ -70,9 +70,9 @@ Download both to your local system, e.g. ~/Downloads/.
 
 Open the main Python file (e.g. app.py, main.py, or gradio_llama.py) and update these lines:
 
-MODEL_PATH  = "/Users/yourname/Downloads/Qwen2-VL-7B-Instruct-Q4_K_M.gguf"
+	MODEL_PATH  = "/Users/yourname/Downloads/Qwen2-VL-7B-Instruct-Q4_K_M.gguf"
 
-MMPROJ_PATH = "/Users/yourname/Downloads/mmproj-Qwen2-VL-7B-Instruct-f16.gguf"
+	MMPROJ_PATH = "/Users/yourname/Downloads/mmproj-Qwen2-VL-7B-Instruct-f16.gguf"
 
 If you don’t have an mmproj file, set:
 
@@ -90,13 +90,13 @@ Running on local URL: http://127.0.0.1:7860
 
 💬 Using the Interface
 
-	1.	Enter your text prompt in the box.
+1.	Enter your text prompt in the box.
 	
-	2.	(Optional) Upload an image if your model supports vision.
+2.	(Optional) Upload an image if your model supports vision.
 	
-	3.	Press Generate.
+3.	Press Generate.
 	
-	4.	Watch responses stream live.
+4.	Watch responses stream live.
 
 If no model is loaded, the app will guide you to provide valid file paths before chatting.
 
