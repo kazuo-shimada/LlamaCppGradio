@@ -58,11 +58,10 @@ Example: Hugging Face – Meta Llama Models￼
 
 Example model pair
 
-Model
+- Model
 Qwen2-VL-7B-Instruct-Q4_K_M.gguf
 
-
-Projector
+- Projector
 mmproj-Qwen2-VL-7B-Instruct-f16.gguf
 
 Download both to your local system, e.g. ~/Downloads/.
