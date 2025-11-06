@@ -32,10 +32,12 @@ Step 1 — Clone this repository
 git clone https://github.com/yourusername/llama-gradio-ui.git
 cd llama-gradio-ui
 
+
 Step 2 — Create and activate a virtual environment
 
 python3 -m venv .venv
 source .venv/bin/activate
+
 
 Step 3 — Install dependencies
 
@@ -46,6 +48,7 @@ Note for Apple Silicon users:
 To enable GPU acceleration with Metal, install llama-cpp-python like this:
 
 CMAKE_ARGS="-DLLAMA_METAL=on" pip install --force-reinstall llama-cpp-python
+
 
 🧩 Step 4 — Download a Model and Projector
 
@@ -62,6 +65,7 @@ mmproj-Qwen2-VL-7B-Instruct-f16.gguf
 
 Download both to your local system, e.g. ~/Downloads/.
 
+
 🧠 Step 5 — Configure the Script
 
 Open the main Python file (e.g. app.py, main.py, or gradio_llama.py) and update these lines:
@@ -75,6 +79,7 @@ MMPROJ_PATH = None
 The app will run in text-only mode.
 
 🖥️ Step 6 — Run the Program
+
 
 From your project folder:
 python3 main.py
