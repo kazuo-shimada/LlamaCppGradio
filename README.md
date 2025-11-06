@@ -77,7 +77,8 @@ Open the main Python file (e.g. app.py, main.py, or gradio_llama.py) and update 
 
 If you don’t have an mmproj file, set:
 
-MMPROJ_PATH = None
+	MMPROJ_PATH = None
+
 The app will run in text-only mode.
 
 🖥️ Step 6 — Run the Program
