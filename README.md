@@ -60,6 +60,8 @@ Example model pair
 
 Model
 Qwen2-VL-7B-Instruct-Q4_K_M.gguf
+
+
 Projector
 mmproj-Qwen2-VL-7B-Instruct-f16.gguf
 
