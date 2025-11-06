@@ -121,8 +121,7 @@ MIT License — free for personal and educational use.
 ⸻
 
 🌐 Resources
-	•	Llama.cpp GitHub￼
-	•	llama-cpp-python Documentation￼
-	•	Gradio Docs￼
-	•	Hugging Face Models￼
+	•	[Llama.cpp GitHub￼](https://github.com/ggml-org/llama.cpp)
+	•	[Gradio Docs￼](https://www.gradio.app)
+	•	[Hugging Face Models](https://huggingface.co/models)￼
 
