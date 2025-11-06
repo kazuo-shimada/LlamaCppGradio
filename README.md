@@ -89,9 +89,13 @@ You should see output similar to:
 Running on local URL: http://127.0.0.1:7860
 
 💬 Using the Interface
+
 	1.	Enter your text prompt in the box.
+	
 	2.	(Optional) Upload an image if your model supports vision.
+	
 	3.	Press Generate.
+	
 	4.	Watch responses stream live.
 
 If no model is loaded, the app will guide you to provide valid file paths before chatting.
