@@ -71,6 +71,7 @@ Download both to your local system, e.g. ~/Downloads/.
 Open the main Python file (e.g. app.py, main.py, or gradio_llama.py) and update these lines:
 
 MODEL_PATH  = "/Users/yourname/Downloads/Qwen2-VL-7B-Instruct-Q4_K_M.gguf"
+
 MMPROJ_PATH = "/Users/yourname/Downloads/mmproj-Qwen2-VL-7B-Instruct-f16.gguf"
 
 If you don’t have an mmproj file, set:
