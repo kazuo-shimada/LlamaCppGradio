@@ -99,21 +99,21 @@ C) Create a virtual environment
 
 •	macOS/Linux:
 
-•	python3 -m venv .venv
+	python3 -m venv .venv
 
-•	source .venv/bin/activate
+	source .venv/bin/activate
 	
 •	Windows (PowerShell):
 
-•	python -m venv .venv
+	python -m venv .venv
 
-•	.\.venv\Scripts\Activate.ps1
+	.\.venv\Scripts\Activate.ps1
 
 D) Upgrade pip and install dependencies
 
-•	python -m pip install --upgrade pip
+	python -m pip install --upgrade pip
 
-•	pip install --upgrade "llama-cpp-python[server]" gradio
+	pip install --upgrade "llama-cpp-python[server]" gradio
 
 On Apple Silicon, the prebuilt llama-cpp-python wheels use Metal acceleration automatically when available.
 
@@ -123,7 +123,9 @@ On Apple Silicon, the prebuilt llama-cpp-python wheels use Metal acceleration au
 
 •	Activate your virtual environment (see 4C).
 
-•	Run: python app.py
+•	Run: 
+	
+	python app.py
 
 •	Open the printed local URL in your browser (default port is 7860).
 
