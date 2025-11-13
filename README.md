@@ -50,7 +50,7 @@ Contents
 
 •	Simple, single-file app for easy modification.
 
-3) Requirements
+2) Requirements
 
 •	Operating system: macOS (Apple Silicon recommended), Linux, or Windows.
 
@@ -61,7 +61,7 @@ Contents
 •	Disk space: enough to store the GGUF model and (if needed) its mmproj file.
 
 
-4) Quick Start (most users)
+3) Quick Start (most users)
 
 1.	Install Python 3.10–3.13.
 
@@ -81,7 +81,7 @@ Contents
 
 8.	Click “Load / Reload model”, then chat. To analyze an image, upload an image and ask about it.
 
-5) Step-by-step Installation (beginner friendly)
+4) Step-by-step Installation (beginner friendly)
 
 A) Install Python
 
