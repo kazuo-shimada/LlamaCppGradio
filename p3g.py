@@ -26,25 +26,47 @@ def _img_to_data_uri(path: str) -> str:
 def _build_messages(prompt: str, image_path: Optional[str], put_image_first=True):
     if image_path and os.path.exists(image_path):
         data_uri = _img_to_data_uri(image_path)
-        content = [
-            {"type": "image_url", "image_url": {"url": data_uri}},
-            {"type": "text", "text": prompt or "Describe the image."},
-        ] if put_image_first else [
-            {"type": "text", "text": prompt or "Describe the image."},
-            {"type": "image_url", "image_url": {"url": data_uri}},
-        ]
+        content = (
+            [
+                {"type": "image_url", "image_url": {"url": data_uri}},
+                {"type": "text", "text": prompt or "Describe the image."},
+            ]
+            if put_image_first
+            else [
+                {"type": "text", "text": prompt or "Describe the image."},
+                {"type": "image_url", "image_url": {"url": data_uri}},
+            ]
+        )
         return [{"role": "user", "content": content}]
     return [{"role": "user", "content": prompt or "Say hello."}]
 
+# -------------------------------------------------------------------
+# Auto-handler with NEW behavior:
+# ANYTHING unknown → fallback to LLaVA15 handler instead of None
+# -------------------------------------------------------------------
 def _infer_handler_from_name(model_path: str) -> str:
     name = os.path.basename(model_path).lower()
-    if "qwen2.5-vl" in name or "qwen2_5-vl" in name:
+
+    # Qwen2.5-VL explicitly supported
+    if (
+        "qwen2.5-vl" in name
+        or "qwen2_5-vl" in name
+        or "qwen25-vl" in name
+        or "qwen2.5_vl" in name
+    ):
         return "Qwen2.5-VL (chat_format)"
-    if "qwen2-vl" in name or "qwen-vl" in name:
-        return "LLaVA15 (chat_handler)"
+
+    # Llava variants → LLaVA15
     if "llava" in name:
         return "LLaVA15 (chat_handler)"
-    return "Raw text (no images)"
+
+    # NEW REQUESTED BEHAVIOR:
+    # Qwen2-VL is UNKNOWN but now forced to fallback
+    if "qwen2-vl" in name or "qwen-vl" in name or "qwen2_vl" in name:
+        return "LLaVA15 (chat_handler)"
+
+    # EVERYTHING ELSE → fallback to LLaVA15
+    return "LLaVA15 (chat_handler)"
 
 # ----------------------------
 # Model loader
@@ -59,7 +81,6 @@ def load_model(
 ):
     global LLM, CURR_DESC
     with LLM_LOCK:
-        # Close previous instance by dereferencing
         LLM = None
 
         kwargs = dict(
@@ -77,11 +98,12 @@ def load_model(
         if handler_choice == "Qwen2.5-VL (chat_format)":
             if not mmproj_file or not os.path.exists(mmproj_file):
                 return None, "Qwen2.5-VL needs an mmproj file. Provide one.", ""
-            # Use chat_format with mmproj param
-            kwargs.update(dict(
-                chat_format="qwen2.5-vl",
-                mmproj=mmproj_file,
-            ))
+            kwargs.update(
+                dict(
+                    chat_format="qwen2.5-vl",
+                    mmproj=mmproj_file,
+                )
+            )
             desc_lines.append("Handler: chat_format='qwen2.5-vl'")
             desc_lines.append(f"mmproj: {mmproj_file}")
 
@@ -105,7 +127,9 @@ def load_model(
             return None, f"Load error: {e}", ""
 
         LLM = llm
-        CURR_DESC = "\n".join(desc_lines + [f"n_ctx={n_ctx}", f"n_gpu_layers={n_gpu_layers}"])
+        CURR_DESC = "\n".join(
+            desc_lines + [f"n_ctx={n_ctx}", f"n_gpu_layers={n_gpu_layers}"]
+        )
         return True, "Loaded.", CURR_DESC
 
 # ----------------------------
@@ -128,7 +152,12 @@ def generate_response_stream(prompt, image_path):
         ):
             choice = chunk.get("choices", [{}])[0]
             delta = choice.get("delta", {})
-            piece = delta.get("content") or delta.get("text") or choice.get("text") or ""
+            piece = (
+                delta.get("content")
+                or delta.get("text")
+                or choice.get("text")
+                or ""
+            )
             if piece:
                 acc += piece
                 yield acc
@@ -176,7 +205,7 @@ with gr.Blocks(title="Local VL · GGUF+mmproj · Streaming") as demo:
     gr.Markdown("---")
     with gr.Row():
         prompt_in = gr.Textbox(label="Prompt", lines=5)
-        image_in  = gr.Image(label="Image (optional)", type="filepath")
+        image_in = gr.Image(label="Image (optional)", type="filepath")
     out = gr.Textbox(label="Response", lines=14)
     gen_btn = gr.Button("Generate")
 
