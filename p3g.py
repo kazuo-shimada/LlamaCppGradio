@@ -1,10 +1,30 @@
 # pip install --upgrade "llama-cpp-python[server]" gradio
 import os, base64, mimetypes, traceback, threading
 import gradio as gr
-from typing import Optional
+from typing import Optional, Dict, Any, Tuple, Callable
 
 from llama_cpp import Llama
-from llama_cpp.llama_chat_format import Llava15ChatHandler
+
+# Try to import all known vision chat handlers that may exist in your installed version.
+# We build a dynamic registry so the UI only shows handlers that are actually available.
+_HANDLER_IMPORTS = {
+    "LLaVA 1.5 (Llava15ChatHandler)": ("llama_cpp.llama_chat_format", "Llava15ChatHandler"),
+    "LLaVA 1.6 (Llava16ChatHandler)": ("llama_cpp.llama_chat_format", "Llava16ChatHandler"),
+    "Moondream2 (MoondreamChatHandler)": ("llama_cpp.llama_chat_format", "MoondreamChatHandler"),
+    "NanoLLaVA (NanollavaChatHandler)": ("llama_cpp.llama_chat_format", "NanollavaChatHandler"),
+    "Llama-3 Vision Alpha (Llama3VisionAlphaChatHandler)": ("llama_cpp.llama_chat_format", "Llama3VisionAlphaChatHandler"),
+    "MiniCPM-V 2.6 (MiniCPMv26ChatHandler)": ("llama_cpp.llama_chat_format", "MiniCPMv26ChatHandler"),
+    "Qwen2.5-VL (Qwen25VLChatHandler)": ("llama_cpp.llama_chat_format", "Qwen25VLChatHandler"),
+}
+
+AVAILABLE_HANDLERS: Dict[str, Any] = {}
+for label, (mod, cls_name) in _HANDLER_IMPORTS.items():
+    try:
+        module = __import__(mod, fromlist=[cls_name])
+        AVAILABLE_HANDLERS[label] = getattr(module, cls_name)
+    except Exception:
+        # Not available in this installed version; skip
+        pass
 
 # ----------------------------
 # Globals + simple load lock
@@ -12,6 +32,39 @@ from llama_cpp.llama_chat_format import Llava15ChatHandler
 LLM_LOCK = threading.Lock()
 LLM: Optional[Llama] = None
 CURR_DESC = ""
+
+# ----------------------------
+# Supported chat_format list (text-only)
+# ----------------------------
+CHAT_FORMATS = [
+    "llama-2",
+    "llama-3",
+    "alpaca",
+    "qwen",
+    "vicuna",
+    "oasst_llama",
+    "baichuan-2",
+    "baichuan",
+    "openbuddy",
+    "redpajama-incite",
+    "snoozy",
+    "phind",
+    "intel",
+    "open-orca",
+    "mistrallite",
+    "zephyr",
+    "pygmalion",
+    "chatml",
+    "mistral-instruct",
+    "chatglm3",
+    "openchat",
+    "saiga",
+    "gemma",
+    "functionary",
+    "functionary-v2",
+    "functionary-v1",
+    "chatml-function-calling",
+]
 
 # ----------------------------
 # Utilities
@@ -40,33 +93,30 @@ def _build_messages(prompt: str, image_path: Optional[str], put_image_first=True
         return [{"role": "user", "content": content}]
     return [{"role": "user", "content": prompt or "Say hello."}]
 
-# -------------------------------------------------------------------
-# Auto-handler with NEW behavior:
-# ANYTHING unknown → fallback to LLaVA15 handler instead of None
-# -------------------------------------------------------------------
-def _infer_handler_from_name(model_path: str) -> str:
+# ----------------------------
+# Filename-based auto-detect → pick the most likely vision handler.
+# Fallback policy: if no match, choose LLaVA 1.5 (if available), else first available.
+# ----------------------------
+_PATTERNS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("LLaVA 1.5 (Llava15ChatHandler)", ("llava-1.5", "llava15")),
+    ("LLaVA 1.6 (Llava16ChatHandler)", ("llava-1.6", "llava16")),
+    ("Moondream2 (MoondreamChatHandler)", ("moondream2", "moondream")),
+    ("NanoLLaVA (NanollavaChatHandler)", ("nanollava", "nano-llava")),
+    ("Llama-3 Vision Alpha (Llama3VisionAlphaChatHandler)", ("llama-3-vision", "llama3-vision", "llama-3-vision-alpha")),
+    ("MiniCPM-V 2.6 (MiniCPMv26ChatHandler)", ("minicpm-v-2.6", "minicpmv26", "minicpm-v2.6")),
+    ("Qwen2.5-VL (Qwen25VLChatHandler)", ("qwen2.5-vl", "qwen2_5-vl", "qwen25-vl", "qwen-2.5-vl")),
+)
+
+def _infer_handler_from_name(model_path: str) -> Optional[str]:
     name = os.path.basename(model_path).lower()
-
-    # Qwen2.5-VL explicitly supported
-    if (
-        "qwen2.5-vl" in name
-        or "qwen2_5-vl" in name
-        or "qwen25-vl" in name
-        or "qwen2.5_vl" in name
-    ):
-        return "Qwen2.5-VL (chat_format)"
-
-    # Llava variants → LLaVA15
-    if "llava" in name:
-        return "LLaVA15 (chat_handler)"
-
-    # NEW REQUESTED BEHAVIOR:
-    # Qwen2-VL is UNKNOWN but now forced to fallback
-    if "qwen2-vl" in name or "qwen-vl" in name or "qwen2_vl" in name:
-        return "LLaVA15 (chat_handler)"
-
-    # EVERYTHING ELSE → fallback to LLaVA15
-    return "LLaVA15 (chat_handler)"
+    for label, keys in _PATTERNS:
+        if label in AVAILABLE_HANDLERS:
+            if any(k in name for k in keys):
+                return label
+    # Fallback preference: Llava15 if present, else any available handler
+    if "LLaVA 1.5 (Llava15ChatHandler)" in AVAILABLE_HANDLERS:
+        return "LLaVA 1.5 (Llava15ChatHandler)"
+    return next(iter(AVAILABLE_HANDLERS.keys()), None)
 
 # ----------------------------
 # Model loader
@@ -74,7 +124,8 @@ def _infer_handler_from_name(model_path: str) -> str:
 def load_model(
     model_file: str,
     mmproj_file: Optional[str],
-    handler_choice: str,
+    handler_choice: str,         # "Auto from filename" | any AVAILABLE_HANDLERS key | "Raw text (no images)"
+    chat_format_choice: str,     # "" for none/auto, otherwise one of CHAT_FORMATS (used only for Raw text)
     n_ctx: int,
     n_gpu_layers: int,
     verbose: bool
@@ -89,34 +140,46 @@ def load_model(
             n_gpu_layers=n_gpu_layers,
             verbose=verbose,
         )
-
         desc_lines = [f"Model: {model_file}"]
 
+        # Resolve vision handler selection
         if handler_choice == "Auto from filename":
-            handler_choice = _infer_handler_from_name(model_file)
+            inferred = _infer_handler_from_name(model_file)
+            if inferred is None:
+                return None, (
+                    "No vision handlers are available in this llama-cpp-python build.\n"
+                    "Switch to 'Raw text (no images)' or install a version with vision handlers."
+                ), ""
+            handler_choice = inferred
 
-        if handler_choice == "Qwen2.5-VL (chat_format)":
+        # Vision path using a chat_handler
+        if handler_choice in AVAILABLE_HANDLERS:
             if not mmproj_file or not os.path.exists(mmproj_file):
-                return None, "Qwen2.5-VL needs an mmproj file. Provide one.", ""
-            kwargs.update(
-                dict(
-                    chat_format="qwen2.5-vl",
-                    mmproj=mmproj_file,
-                )
-            )
-            desc_lines.append("Handler: chat_format='qwen2.5-vl'")
-            desc_lines.append(f"mmproj: {mmproj_file}")
-
-        elif handler_choice == "LLaVA15 (chat_handler)":
-            if not mmproj_file or not os.path.exists(mmproj_file):
-                return None, "LLaVA15 handler needs an mmproj file. Provide one.", ""
-            chat_handler = Llava15ChatHandler(clip_model_path=mmproj_file)
+                return None, f"{handler_choice} needs an mmproj (vision projector) .gguf file. Provide one.", ""
+            handler_cls = AVAILABLE_HANDLERS[handler_choice]
+            try:
+                # Most handlers accept clip_model_path=...
+                chat_handler = handler_cls(clip_model_path=mmproj_file)
+            except TypeError:
+                # Fallback: try common alternative kw names
+                try:
+                    chat_handler = handler_cls(mmproj=mmproj_file)
+                except TypeError:
+                    # Last resort: try no-arg and rely on model kwargs later (rare)
+                    chat_handler = handler_cls()
             kwargs.update(dict(chat_handler=chat_handler))
-            desc_lines.append("Handler: Llava15ChatHandler")
+            desc_lines.append(f"Handler: {handler_choice}")
             desc_lines.append(f"mmproj: {mmproj_file}")
 
         elif handler_choice == "Raw text (no images)":
             desc_lines.append("Handler: raw text only. Images ignored.")
+            cf = (chat_format_choice or "").strip()
+            if cf:
+                if cf in CHAT_FORMATS:
+                    kwargs["chat_format"] = cf
+                    desc_lines.append(f"chat_format: {cf}")
+                else:
+                    return None, f"Unsupported chat_format selected: {cf}", ""
 
         else:
             return None, f"Unknown handler: {handler_choice}", ""
@@ -127,9 +190,7 @@ def load_model(
             return None, f"Load error: {e}", ""
 
         LLM = llm
-        CURR_DESC = "\n".join(
-            desc_lines + [f"n_ctx={n_ctx}", f"n_gpu_layers={n_gpu_layers}"]
-        )
+        CURR_DESC = "\n".join(desc_lines + [f"n_ctx={n_ctx}", f"n_gpu_layers={n_gpu_layers}"])
         return True, "Loaded.", CURR_DESC
 
 # ----------------------------
@@ -140,7 +201,6 @@ def generate_response_stream(prompt, image_path):
     if LLM is None:
         yield "Model is not loaded. Load a model first."
         return
-
     try:
         messages = _build_messages(prompt, image_path, put_image_first=True)
         acc = ""
@@ -152,12 +212,7 @@ def generate_response_stream(prompt, image_path):
         ):
             choice = chunk.get("choices", [{}])[0]
             delta = choice.get("delta", {})
-            piece = (
-                delta.get("content")
-                or delta.get("text")
-                or choice.get("text")
-                or ""
-            )
+            piece = delta.get("content") or delta.get("text") or choice.get("text") or ""
             if piece:
                 acc += piece
                 yield acc
@@ -171,26 +226,23 @@ with gr.Blocks(title="Local VL · GGUF+mmproj · Streaming") as demo:
     gr.Markdown("### Local Multimodal LLM · Drag-and-drop model and mmproj")
 
     with gr.Row():
-        model_file = gr.File(
-            label="Model GGUF",
-            file_types=[".gguf"],
-            type="filepath"
-        )
-        mmproj_file = gr.File(
-            label="mmproj GGUF (optional for text-only, required for images)",
-            file_types=[".gguf"],
-            type="filepath"
-        )
+        model_file = gr.File(label="Model GGUF", file_types=[".gguf"], type="filepath")
+        mmproj_file = gr.File(label="mmproj GGUF (required for vision handlers)", file_types=[".gguf"], type="filepath")
 
+    # Build handler dropdown from available handlers dynamically
+    handler_choices = ["Auto from filename"] + list(AVAILABLE_HANDLERS.keys()) + ["Raw text (no images)"]
+    default_handler = "Auto from filename" if AVAILABLE_HANDLERS else "Raw text (no images)"
     handler_choice = gr.Dropdown(
-        choices=[
-            "Auto from filename",
-            "Qwen2.5-VL (chat_format)",
-            "LLaVA15 (chat_handler)",
-            "Raw text (no images)",
-        ],
-        value="Auto from filename",
+        choices=handler_choices,
+        value=default_handler,
         label="Vision handler"
+    )
+
+    # Text chat_format dropdown (used only when handler = Raw text)
+    chat_format_choice = gr.Dropdown(
+        choices=[""] + CHAT_FORMATS,  # empty string = no chat_format (use model default)
+        value="",
+        label="Chat format (text-only; ignored if using a vision handler)"
     )
 
     with gr.Row():
@@ -200,22 +252,23 @@ with gr.Blocks(title="Local VL · GGUF+mmproj · Streaming") as demo:
 
     load_btn = gr.Button("Load / Reload model", variant="primary")
     load_status = gr.Markdown()
-    model_desc = gr.Textbox(label="Current model config", lines=6)
+    model_desc = gr.Textbox(label="Current model config", lines=10)
 
     gr.Markdown("---")
     with gr.Row():
         prompt_in = gr.Textbox(label="Prompt", lines=5)
-        image_in = gr.Image(label="Image (optional)", type="filepath")
-    out = gr.Textbox(label="Response", lines=14)
+        image_in  = gr.Image(label="Image (optional; used only with a vision handler)", type="filepath")
+    out = gr.Textbox(label="Response (streaming)", lines=14)
     gen_btn = gr.Button("Generate")
 
-    def _on_load(model_path, mmproj_path, handler, ctx, ngpu, verb):
+    def _on_load(model_path, mmproj_path, handler, cf_choice, ctx, ngpu, verb):
         if model_path is None:
             return "Provide a model GGUF.", ""
         ok, msg, desc = load_model(
             model_file=model_path,
             mmproj_file=mmproj_path,
             handler_choice=handler,
+            chat_format_choice=cf_choice,
             n_ctx=int(ctx),
             n_gpu_layers=int(ngpu),
             verbose=bool(verb),
@@ -226,7 +279,7 @@ with gr.Blocks(title="Local VL · GGUF+mmproj · Streaming") as demo:
 
     load_btn.click(
         _on_load,
-        inputs=[model_file, mmproj_file, handler_choice, n_ctx, n_gpu_layers, verbose],
+        inputs=[model_file, mmproj_file, handler_choice, chat_format_choice, n_ctx, n_gpu_layers, verbose],
         outputs=[load_status, model_desc],
     )
 
