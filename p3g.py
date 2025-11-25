@@ -1,74 +1,62 @@
 # pip install --upgrade "llama-cpp-python[server]" gradio
 import os, base64, mimetypes, traceback, threading
 import gradio as gr
-from typing import Optional, Dict, Any, Tuple, Callable
+from typing import Optional, Dict, Any
 
 from llama_cpp import Llama
+import llama_cpp.llama_chat_format as lcf  # used only to dynamically list text chat_formats
 
-# Try to import all known vision chat handlers that may exist in your installed version.
-# We build a dynamic registry so the UI only shows handlers that are actually available.
-_HANDLER_IMPORTS = {
-    "LLaVA 1.5 (Llava15ChatHandler)": ("llama_cpp.llama_chat_format", "Llava15ChatHandler"),
-    "LLaVA 1.6 (Llava16ChatHandler)": ("llama_cpp.llama_chat_format", "Llava16ChatHandler"),
-    "Moondream2 (MoondreamChatHandler)": ("llama_cpp.llama_chat_format", "MoondreamChatHandler"),
-    "NanoLLaVA (NanollavaChatHandler)": ("llama_cpp.llama_chat_format", "NanollavaChatHandler"),
-    "Llama-3 Vision Alpha (Llama3VisionAlphaChatHandler)": ("llama_cpp.llama_chat_format", "Llama3VisionAlphaChatHandler"),
-    "MiniCPM-V 2.6 (MiniCPMv26ChatHandler)": ("llama_cpp.llama_chat_format", "MiniCPMv26ChatHandler"),
-    "Qwen2.5-VL (Qwen25VLChatHandler)": ("llama_cpp.llama_chat_format", "Qwen25VLChatHandler"),
-}
-
-AVAILABLE_HANDLERS: Dict[str, Any] = {}
-for label, (mod, cls_name) in _HANDLER_IMPORTS.items():
-    try:
-        module = __import__(mod, fromlist=[cls_name])
-        AVAILABLE_HANDLERS[label] = getattr(module, cls_name)
-    except Exception:
-        # Not available in this installed version; skip
-        pass
-
-# ----------------------------
-# Globals + simple load lock
-# ----------------------------
+# ============================
+# Globals
+# ============================
 LLM_LOCK = threading.Lock()
 LLM: Optional[Llama] = None
-CURR_DESC = ""
+CURR_DESC = ""          # human-readable current config
+IS_TEXT_ONLY = True     # runtime flag so we can ignore images when needed
 
-# ----------------------------
-# Supported chat_format list (text-only)
-# ----------------------------
-CHAT_FORMATS = [
-    "llama-2",
-    "llama-3",
-    "alpaca",
-    "qwen",
-    "vicuna",
-    "oasst_llama",
-    "baichuan-2",
-    "baichuan",
-    "openbuddy",
-    "redpajama-incite",
-    "snoozy",
-    "phind",
-    "intel",
-    "open-orca",
-    "mistrallite",
-    "zephyr",
-    "pygmalion",
-    "chatml",
-    "mistral-instruct",
-    "chatglm3",
-    "openchat",
-    "saiga",
-    "gemma",
-    "functionary",
-    "functionary-v2",
-    "functionary-v1",
-    "chatml-function-calling",
-]
+# ============================
+# Dynamic discovery
+# ============================
+def _discover_chat_formats() -> list[str]:
+    """
+    Ask llama-cpp-python for the chat formats it currently registers.
+    We don't hardcode; this updates automatically as your package updates.
+    """
+    names: set[str] = set()
 
-# ----------------------------
+    # Known registries across versions
+    for attr in ("CHAT_FORMATS", "CHAT_FORMAT_REGISTRY", "_CHAT_FORMATS", "_CHAT_FORMAT_REGISTRY"):
+        if hasattr(lcf, attr):
+            reg = getattr(lcf, attr)
+            if isinstance(reg, dict):
+                names.update(map(str, reg.keys()))
+
+    # Optional helper functions in some versions
+    for fn in ("chat_format_names", "list_chat_format_names", "get_chat_format_names"):
+        if hasattr(lcf, fn):
+            try:
+                maybe = getattr(lcf, fn)()
+                if isinstance(maybe, (list, tuple)):
+                    names.update(map(str, maybe))
+            except Exception:
+                pass
+
+    # Fallback list if discovery fails
+    if not names:
+        names = {
+            "llama-2", "llama-3", "alpaca", "qwen", "vicuna", "oasst_llama",
+            "baichuan-2", "baichuan", "openbuddy", "redpajama-incite", "snoozy",
+            "phind", "intel", "open-orca", "mistrallite", "zephyr", "pygmalion",
+            "chatml", "mistral-instruct", "chatglm3", "openchat", "saiga", "gemma",
+            "functionary", "functionary-v2", "functionary-v1", "chatml-function-calling",
+        }
+    return sorted(names)
+
+CHAT_FORMATS = _discover_chat_formats()
+
+# ============================
 # Utilities
-# ----------------------------
+# ============================
 def _img_to_data_uri(path: str) -> str:
     mime, _ = mimetypes.guess_type(path)
     if not mime:
@@ -93,48 +81,33 @@ def _build_messages(prompt: str, image_path: Optional[str], put_image_first=True
         return [{"role": "user", "content": content}]
     return [{"role": "user", "content": prompt or "Say hello."}]
 
-# ----------------------------
-# Filename-based auto-detect → pick the most likely vision handler.
-# Fallback policy: if no match, choose LLaVA 1.5 (if available), else first available.
-# ----------------------------
-_PATTERNS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-    ("LLaVA 1.5 (Llava15ChatHandler)", ("llava-1.5", "llava15")),
-    ("LLaVA 1.6 (Llava16ChatHandler)", ("llava-1.6", "llava16")),
-    ("Moondream2 (MoondreamChatHandler)", ("moondream2", "moondream")),
-    ("NanoLLaVA (NanollavaChatHandler)", ("nanollava", "nano-llava")),
-    ("Llama-3 Vision Alpha (Llama3VisionAlphaChatHandler)", ("llama-3-vision", "llama3-vision", "llama-3-vision-alpha")),
-    ("MiniCPM-V 2.6 (MiniCPMv26ChatHandler)", ("minicpm-v-2.6", "minicpmv26", "minicpm-v2.6")),
-    ("Qwen2.5-VL (Qwen25VLChatHandler)", ("qwen2.5-vl", "qwen2_5-vl", "qwen25-vl", "qwen-2.5-vl")),
-)
-
-def _infer_handler_from_name(model_path: str) -> Optional[str]:
-    name = os.path.basename(model_path).lower()
-    for label, keys in _PATTERNS:
-        if label in AVAILABLE_HANDLERS:
-            if any(k in name for k in keys):
-                return label
-    # Fallback preference: Llava15 if present, else any available handler
-    if "LLaVA 1.5 (Llava15ChatHandler)" in AVAILABLE_HANDLERS:
-        return "LLaVA 1.5 (Llava15ChatHandler)"
-    return next(iter(AVAILABLE_HANDLERS.keys()), None)
-
-# ----------------------------
-# Model loader
-# ----------------------------
+# ============================
+# Loader (AUTO like llama-cpp-python)
+# ============================
 def load_model(
     model_file: str,
     mmproj_file: Optional[str],
-    handler_choice: str,         # "Auto from filename" | any AVAILABLE_HANDLERS key | "Raw text (no images)"
-    chat_format_choice: str,     # "" for none/auto, otherwise one of CHAT_FORMATS (used only for Raw text)
+    load_mode: str,          # "Auto (recommended)" | "Force text-only" | "Advanced (manual chat_format override)"
+    chat_format_choice: str, # used only for "Advanced (manual ...)"
     n_ctx: int,
     n_gpu_layers: int,
     verbose: bool
 ):
-    global LLM, CURR_DESC
+    """
+    Auto-behavior mirrors llama-cpp-python:
+      - We don't guess from filenames.
+      - We do NOT set chat_format or chat_handler in Auto mode.
+      - If mmproj is provided, we pass it as `mmproj=...` so llama-cpp-python can
+        automatically instantiate the appropriate vision handler for that model.
+      - If no mmproj is provided, the model runs text-only.
+      - If Auto fails to initialize, we fall back to text-only automatically.
+    """
+    global LLM, CURR_DESC, IS_TEXT_ONLY
     with LLM_LOCK:
         LLM = None
+        IS_TEXT_ONLY = True
 
-        kwargs = dict(
+        kwargs: Dict[str, Any] = dict(
             model_path=model_file,
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
@@ -142,67 +115,85 @@ def load_model(
         )
         desc_lines = [f"Model: {model_file}"]
 
-        # Resolve vision handler selection
-        if handler_choice == "Auto from filename":
-            inferred = _infer_handler_from_name(model_file)
-            if inferred is None:
-                return None, (
-                    "No vision handlers are available in this llama-cpp-python build.\n"
-                    "Switch to 'Raw text (no images)' or install a version with vision handlers."
-                ), ""
-            handler_choice = inferred
+        # -----------------------
+        # Mode selection
+        # -----------------------
+        if load_mode == "Auto (recommended)":
+            # Do not set chat_format or chat_handler here.
+            # Pass mmproj only if provided, to allow llama-cpp-python to auto-wire vision.
+            if mmproj_file and os.path.exists(mmproj_file):
+                kwargs["mmproj"] = mmproj_file
+                desc_lines.append(f"Auto: provided mmproj -> {mmproj_file}")
+            else:
+                desc_lines.append("Auto: no mmproj -> text-only")
 
-        # Vision path using a chat_handler
-        if handler_choice in AVAILABLE_HANDLERS:
-            if not mmproj_file or not os.path.exists(mmproj_file):
-                return None, f"{handler_choice} needs an mmproj (vision projector) .gguf file. Provide one.", ""
-            handler_cls = AVAILABLE_HANDLERS[handler_choice]
+            # Try create Llama. If this fails (e.g., incompatible mmproj), fall back to text-only retry.
             try:
-                # Most handlers accept clip_model_path=...
-                chat_handler = handler_cls(clip_model_path=mmproj_file)
-            except TypeError:
-                # Fallback: try common alternative kw names
-                try:
-                    chat_handler = handler_cls(mmproj=mmproj_file)
-                except TypeError:
-                    # Last resort: try no-arg and rely on model kwargs later (rare)
-                    chat_handler = handler_cls()
-            kwargs.update(dict(chat_handler=chat_handler))
-            desc_lines.append(f"Handler: {handler_choice}")
-            desc_lines.append(f"mmproj: {mmproj_file}")
+                llm = Llama(**kwargs)
+                LLM = llm
+                IS_TEXT_ONLY = "mmproj" not in kwargs  # if we didn't pass mmproj, it's text-only
+                handler_line = "Handler: auto-vision (mmproj)" if not IS_TEXT_ONLY else "Handler: auto text-only"
+                desc_lines.append(handler_line)
 
-        elif handler_choice == "Raw text (no images)":
-            desc_lines.append("Handler: raw text only. Images ignored.")
+            except Exception as e:
+                # Fallback: strip mmproj and try text-only
+                err = f"Auto load failed with mmproj (if any). Falling back to text-only. Reason: {e}"
+                desc_lines.append(f"Notice: {err}")
+                kwargs.pop("mmproj", None)
+                try:
+                    llm = Llama(**kwargs)
+                    LLM = llm
+                    IS_TEXT_ONLY = True
+                    desc_lines.append("Handler: auto text-only (fallback)")
+                except Exception as e2:
+                    return None, f"Load error (text-only fallback also failed): {e2}", ""
+
+        elif load_mode == "Force text-only":
+            # Explicitly force text-only. Optionally allow a user-provided chat_format override.
+            desc_lines.append("Mode: Force text-only")
             cf = (chat_format_choice or "").strip()
             if cf:
-                if cf in CHAT_FORMATS:
-                    kwargs["chat_format"] = cf
-                    desc_lines.append(f"chat_format: {cf}")
-                else:
-                    return None, f"Unsupported chat_format selected: {cf}", ""
+                kwargs["chat_format"] = cf
+                desc_lines.append(f"chat_format: {cf}")
+            try:
+                llm = Llama(**kwargs)
+                LLM = llm
+                IS_TEXT_ONLY = True
+                desc_lines.append("Handler: text-only")
+            except Exception as e:
+                return None, f"Load error (text-only): {e}", ""
 
-        else:
-            return None, f"Unknown handler: {handler_choice}", ""
+        else:  # "Advanced (manual chat_format override)"
+            # This mode lets power users set a chat_format for text-only use.
+            desc_lines.append("Mode: Advanced (manual chat_format override, text-only)")
+            cf = (chat_format_choice or "").strip()
+            if cf:
+                kwargs["chat_format"] = cf
+                desc_lines.append(f"chat_format: {cf}")
+            try:
+                llm = Llama(**kwargs)
+                LLM = llm
+                IS_TEXT_ONLY = True
+                desc_lines.append("Handler: text-only (manual chat_format)")
+            except Exception as e:
+                return None, f"Load error (advanced/manual): {e}", ""
 
-        try:
-            llm = Llama(**kwargs)
-        except Exception as e:
-            return None, f"Load error: {e}", ""
-
-        LLM = llm
         CURR_DESC = "\n".join(desc_lines + [f"n_ctx={n_ctx}", f"n_gpu_layers={n_gpu_layers}"])
         return True, "Loaded.", CURR_DESC
 
-# ----------------------------
+# ============================
 # Inference
-# ----------------------------
+# ============================
 def generate_response_stream(prompt, image_path):
-    global LLM
+    global LLM, IS_TEXT_ONLY
     if LLM is None:
         yield "Model is not loaded. Load a model first."
         return
     try:
-        messages = _build_messages(prompt, image_path, put_image_first=True)
+        # In text-only mode, ignore any provided image.
+        effective_image = None if IS_TEXT_ONLY else image_path
+        messages = _build_messages(prompt, effective_image, put_image_first=True)
+
         acc = ""
         for chunk in LLM.create_chat_completion(
             messages=messages,
@@ -219,30 +210,34 @@ def generate_response_stream(prompt, image_path):
     except Exception as e:
         yield f"Exception: {e}\n\n{traceback.format_exc()}"
 
-# ----------------------------
+# ============================
 # Gradio UI
-# ----------------------------
-with gr.Blocks(title="Local VL · GGUF+mmproj · Streaming") as demo:
-    gr.Markdown("### Local Multimodal LLM · Drag-and-drop model and mmproj")
+# ============================
+with gr.Blocks(title="Local LLM · Auto chat_format/vision · GGUF + optional mmproj") as demo:
+    gr.Markdown("### Local LLM with AUTO chat_format / AUTO vision handling (llama-cpp-python)")
 
     with gr.Row():
         model_file = gr.File(label="Model GGUF", file_types=[".gguf"], type="filepath")
-        mmproj_file = gr.File(label="mmproj GGUF (required for vision handlers)", file_types=[".gguf"], type="filepath")
+        mmproj_file = gr.File(
+            label="mmproj GGUF (optional; provide to enable auto vision if compatible)",
+            file_types=[".gguf"],
+            type="filepath"
+        )
 
-    # Build handler dropdown from available handlers dynamically
-    handler_choices = ["Auto from filename"] + list(AVAILABLE_HANDLERS.keys()) + ["Raw text (no images)"]
-    default_handler = "Auto from filename" if AVAILABLE_HANDLERS else "Raw text (no images)"
-    handler_choice = gr.Dropdown(
-        choices=handler_choices,
-        value=default_handler,
-        label="Vision handler"
+    load_mode = gr.Dropdown(
+        choices=[
+            "Auto (recommended)",
+            "Force text-only",
+            "Advanced (manual chat_format override)",
+        ],
+        value="Auto (recommended)",
+        label="Load mode"
     )
 
-    # Text chat_format dropdown (used only when handler = Raw text)
     chat_format_choice = gr.Dropdown(
-        choices=[""] + CHAT_FORMATS,  # empty string = no chat_format (use model default)
+        choices=[""] + CHAT_FORMATS,   # "" → let llama-cpp-python auto-pick from tokenizer.chat_template
         value="",
-        label="Chat format (text-only; ignored if using a vision handler)"
+        label="Chat format (used only for 'Force text-only' or 'Advanced' modes)"
     )
 
     with gr.Row():
@@ -252,22 +247,22 @@ with gr.Blocks(title="Local VL · GGUF+mmproj · Streaming") as demo:
 
     load_btn = gr.Button("Load / Reload model", variant="primary")
     load_status = gr.Markdown()
-    model_desc = gr.Textbox(label="Current model config", lines=10)
+    model_desc = gr.Textbox(label="Current model config", lines=12)
 
     gr.Markdown("---")
     with gr.Row():
         prompt_in = gr.Textbox(label="Prompt", lines=5)
-        image_in  = gr.Image(label="Image (optional; used only with a vision handler)", type="filepath")
+        image_in  = gr.Image(label="Image (optional; ignored if text-only)", type="filepath")
     out = gr.Textbox(label="Response (streaming)", lines=14)
     gen_btn = gr.Button("Generate")
 
-    def _on_load(model_path, mmproj_path, handler, cf_choice, ctx, ngpu, verb):
+    def _on_load(model_path, mmproj_path, mode, cf_choice, ctx, ngpu, verb):
         if model_path is None:
             return "Provide a model GGUF.", ""
         ok, msg, desc = load_model(
             model_file=model_path,
             mmproj_file=mmproj_path,
-            handler_choice=handler,
+            load_mode=mode,
             chat_format_choice=cf_choice,
             n_ctx=int(ctx),
             n_gpu_layers=int(ngpu),
@@ -279,7 +274,7 @@ with gr.Blocks(title="Local VL · GGUF+mmproj · Streaming") as demo:
 
     load_btn.click(
         _on_load,
-        inputs=[model_file, mmproj_file, handler_choice, chat_format_choice, n_ctx, n_gpu_layers, verbose],
+        inputs=[model_file, mmproj_file, load_mode, chat_format_choice, n_ctx, n_gpu_layers, verbose],
         outputs=[load_status, model_desc],
     )
 
