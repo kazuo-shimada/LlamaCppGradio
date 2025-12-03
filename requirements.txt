@@ -3,6 +3,5 @@ gradio_client==1.13.3
 sympy==1.14.0
 llama_cpp_python==0.3.16
 python-dateutil==2.9.0.post0
-
 certifi==2025.10.5
 wheel==0.45.1
