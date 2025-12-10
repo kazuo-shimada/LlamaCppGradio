@@ -37,3 +37,5 @@ llama_cpp.llama_chat_format = lcf
 
 sys.modules["llama_cpp"] = llama_cpp
 sys.modules["llama_cpp.llama_chat_format"] = lcf
+
+print("Fake llama_cpp module has been set up for testing.")
