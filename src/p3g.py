@@ -6,6 +6,8 @@ from typing import Optional, Dict, Any, Tuple
 from llama_cpp import Llama
 import llama_cpp.llama_chat_format as lcf  # dynamic chat-format discovery
 
+"""Core UI and model logic for p3g. Importable without side effects. Use a separate runner to launch the app."""
+
 # ----------------------------
 # Try to import all vision chat handlers that may exist in your installed version.
 # We build a dynamic registry so the UI only shows handlers that are actually available.
@@ -225,63 +227,77 @@ def generate_response_stream(prompt, image_path):
 # ----------------------------
 # Gradio UI
 # ----------------------------
-with gr.Blocks(title="Local VL · GGUF+mmproj · Streaming") as demo:
-    gr.Markdown("### Local Multimodal LLM · Drag-and-drop model and mmproj")
+def build_ui() -> gr.Blocks:
+    with gr.Blocks(title="Local VL · GGUF+mmproj · Streaming") as demo:
+        gr.Markdown("### Local Multimodal LLM · Drag-and-drop model and mmproj")
 
-    with gr.Row():
-        model_file = gr.File(label="Model GGUF", file_types=[".gguf"], type="filepath")
-        mmproj_file = gr.File(label="mmproj GGUF (optional; required only for vision handlers)", file_types=[".gguf"], type="filepath")
+        with gr.Row():
+            model_file = gr.File(label="Model GGUF", file_types=[".gguf"], type="filepath")
+            mmproj_file = gr.File(label="mmproj GGUF (optional; required only for vision handlers)", file_types=[".gguf"], type="filepath")
 
-    # Build handler dropdown from available handlers dynamically
-    handler_choices = ["Auto from filename"] + list(AVAILABLE_HANDLERS.keys()) + ["Raw text (no images)"]
-    default_handler = "Auto from filename" if AVAILABLE_HANDLERS else "Raw text (no images)"
-    handler_choice = gr.Dropdown(choices=handler_choices, value=default_handler, label="Vision handler")
+        # Build handler dropdown from available handlers dynamically
+        handler_choices = ["Auto from filename"] + list(AVAILABLE_HANDLERS.keys()) + ["Raw text (no images)"]
+        default_handler = "Auto from filename" if AVAILABLE_HANDLERS else "Raw text (no images)"
+        handler_choice = gr.Dropdown(choices=handler_choices, value=default_handler, label="Vision handler")
 
-    # Text chat_format dropdown (used only when handler = Raw text)
-    chat_format_choice = gr.Dropdown(
-        choices=[""] + CHAT_FORMATS,  # "" = Auto (use gguf tokenizer.chat_template / default)
-        value="",
-        label="Chat format (text-only; ignored if using a vision handler)"
-    )
-
-    with gr.Row():
-        n_ctx = gr.Slider(2048, 16384, value=8192, step=1024, label="n_ctx")
-        n_gpu_layers = gr.Number(value=-1, precision=0, label="n_gpu_layers (-1 = all)")
-        verbose = gr.Checkbox(value=True, label="verbose")
-
-    load_btn = gr.Button("Load / Reload model", variant="primary")
-    load_status = gr.Markdown()
-    model_desc = gr.Textbox(label="Current model config", lines=12)
-
-    gr.Markdown("---")
-    with gr.Row():
-        prompt_in = gr.Textbox(label="Prompt", lines=5)
-        image_in  = gr.Image(label="Image (optional; ignored if text-only fallback used)", type="filepath")
-    out = gr.Textbox(label="Response (streaming)", lines=14)
-    gen_btn = gr.Button("Generate")
-
-    def _on_load(model_path, mmproj_path, handler, cf_choice, ctx, ngpu, verb):
-        if model_path is None:
-            return "Provide a model GGUF.", ""
-        ok, msg, desc = load_model(
-            model_file=model_path,
-            mmproj_file=mmproj_path,
-            handler_choice=handler,
-            chat_format_choice=cf_choice,
-            n_ctx=int(ctx),
-            n_gpu_layers=int(ngpu),
-            verbose=bool(verb),
+        # Text chat_format dropdown (used only when handler = Raw text)
+        chat_format_choice = gr.Dropdown(
+            choices=[""] + CHAT_FORMATS,  # "" = Auto (use gguf tokenizer.chat_template / default)
+            value="",
+            label="Chat format (text-only; ignored if using a vision handler)"
         )
-        if ok is None:
-            return msg, ""
-        return msg, desc
 
-    load_btn.click(
-        _on_load,
-        inputs=[model_file, mmproj_file, handler_choice, chat_format_choice, n_ctx, n_gpu_layers, verbose],
-        outputs=[load_status, model_desc],
-    )
+        with gr.Row():
+            n_ctx = gr.Slider(2048, 16384, value=8192, step=1024, label="n_ctx")
+            n_gpu_layers = gr.Number(value=-1, precision=0, label="n_gpu_layers (-1 = all)")
+            verbose = gr.Checkbox(value=True, label="verbose")
 
-    gen_btn.click(generate_response_stream, inputs=[prompt_in, image_in], outputs=out)
+        load_btn = gr.Button("Load / Reload model", variant="primary")
+        load_status = gr.Markdown()
+        model_desc = gr.Textbox(label="Current model config", lines=12)
 
-    demo.queue(max_size=32).launch(server_port=7860, server_name="0.0.0.0")
+        gr.Markdown("---")
+        with gr.Row():
+            prompt_in = gr.Textbox(label="Prompt", lines=5)
+            image_in  = gr.Image(label="Image (optional; ignored if text-only fallback used)", type="filepath")
+        out = gr.Textbox(label="Response (streaming)", lines=14)
+        gen_btn = gr.Button("Generate")
+
+        def _on_load(model_path, mmproj_path, handler, cf_choice, ctx, ngpu, verb):
+            if model_path is None:
+                return "Provide a model GGUF.", ""
+            ok, msg, desc = load_model(
+                model_file=model_path,
+                mmproj_file=mmproj_path,
+                handler_choice=handler,
+                chat_format_choice=cf_choice,
+                n_ctx=int(ctx),
+                n_gpu_layers=int(ngpu),
+                verbose=bool(verb),
+            )
+            if ok is None:
+                return msg, ""
+            return msg, desc
+
+        load_btn.click(
+            _on_load,
+            inputs=[model_file, mmproj_file, handler_choice, chat_format_choice, n_ctx, n_gpu_layers, verbose],
+            outputs=[load_status, model_desc],
+        )
+
+        gen_btn.click(generate_response_stream, inputs=[prompt_in, image_in], outputs=out)
+
+    return demo
+
+__all__ = [
+    "_build_messages",
+    "load_model",
+    "generate_response_stream",
+    "_infer_handler_from_name",
+    "AVAILABLE_HANDLERS",
+    "CHAT_FORMATS",
+    "LLM",
+    "CURR_DESC",
+    "LLM_LOCK",
+    "build_ui",
+]

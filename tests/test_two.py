@@ -1,6 +1,6 @@
 import importlib
 
-def reload_app(modname="p3g"):
+def reload_app(modname="src.p3g"):
     import sys
     if modname in sys.modules:
         sys.modules.pop(modname, None)
