@@ -199,7 +199,6 @@ def load_model(
 # Inference
 # ----------------------------
 def generate_response_stream(prompt, image_path):
-    global LLM, CURR_DESC
     if LLM is None:
         yield "Model is not loaded. Load a model first."
         return
