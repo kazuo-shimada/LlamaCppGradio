@@ -1,3 +1,23 @@
+# p3g
+
+## Requirements
+- Docker installed
+
+## Build
+docker build -t p3g:local .
+
+## Run (mount your models)
+docker run --rm -it \
+  -p 7860:7860 \
+  -e MODEL_PATH=/models/your-model.gguf \
+  -e MMPROJ_PATH=/models/your-mmproj.gguf \
+  -v /path/on/host/models:/models:ro \
+  p3g:local
+
+
+
+  
+
 🦙 Run Llama.cpp with Python Bindings and Gradio UI
 
 A lightweight local interface for running Llama.cpp models (including vision-enabled GGUFs) using Python bindings and a Gradio web UI.
