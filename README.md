@@ -13,3 +13,5 @@ docker run --rm -it \
   -e MMPROJ_PATH=/models/your-mmproj.gguf \
   -v /path/on/host/models:/models:ro \
   p3g:local
+
+Download Qwen2-VL models and place them in the models/ folder.
