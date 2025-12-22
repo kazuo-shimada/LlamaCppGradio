@@ -1,0 +1,8 @@
+services:
+  my-app:
+    # Use the tag you just pushed!
+    image: ghcr.io/kazuo-shimada/llamacppgradio:container
+    ports:
+      - "8080:80"
+    volumes:
+      - ./env_file.txt:/app/config/env_file.txt
