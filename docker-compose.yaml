@@ -1,8 +1,29 @@
+version: '3'
+
 services:
-  my-app:
-    # Use the tag you just pushed!
-    image: ghcr.io/kazuo-shimada/llamacppgradio:container
+  app:
+    # Uses the Dockerfile in the current directory to build the image
+    build: . 
+    container_name: llamacppgradio-my-app-1
+    
+    # Maps your Mac's port 8080 to the container's internal port 7860
     ports:
-      - "8080:80"
+      - "8080:7860"
+    
     volumes:
-      - ./env_file.txt:/app/config/env_file.txt
+      # 1. Config file (Using PWD for absolute path)
+      - ${PWD}/env_file.txt:/app/config/env_file.txt
+      
+      # 2. Source Code (Allows your Python edits to take effect instantly)
+      - ${PWD}/src:/app/src
+      
+      # 3. MODELS (Using PWD to ensure Docker finds your models folder)
+      - ${PWD}/models:/app/models
+    
+    # Loads environment variables
+    env_file:
+      - ./env_file.txt
+    
+    # Ensures you see output in the terminal
+    tty: true
+    stdin_open: true
