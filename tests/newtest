@@ -1,0 +1,120 @@
+# pytest unit tests for your GGUF/mmproj UI without requiring real llama_cpp
+# - Stubs a minimal llama_cpp + llama_cpp.llama_chat_format before import
+# - Verifies message building, text-only fallback in load_model, and streaming output
+
+import sys
+import types
+import importlib
+import os
+from pathlib import Path
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Configure the module name to import.
+# Rename this to match your file name (without .py). For example:
+#   if your file is "app.py" → MODULE_NAME = "app"
+#   if your file is "server.py" → MODULE_NAME = "server"
+MODULE_NAME = os.getenv("APP_MODULE", "app")
+# ────────────────────────────────────────────────────────────────────────────────
+
+def import_app():
+    """
+    Insert fake modules into sys.modules so importing your app does not require
+    the real native llama_cpp package or any vision handlers.
+    """
+    # Fake chat_format registry with a couple of names your code will discover
+    fake_lcf = types.SimpleNamespace(
+        CHAT_FORMATS={"llama-3": object(), "alpaca": object()},
+        chat_format_names=lambda: ["llama-3", "alpaca"],
+    )
+
+    class DummyLlama:
+        def __init__(self, **kwargs):
+            # capture kwargs so tests can assert things like n_ctx, n_gpu_layers
+            self.kwargs = kwargs
+
+        # Simulate the streaming API your code uses
+        def create_chat_completion(self, messages, max_tokens, temperature, stream):
+            assert stream is True
+            # yield two chunks with "Hello" + " world"
+            yield {"choices": [{"delta": {"content": "Hello"}}]}
+            yield {"choices": [{"delta": {"content": " world"}}]}
+
+    # Provide a top-level module with Llama and nested llama_chat_format
+    fake_llama_cpp = types.SimpleNamespace(Llama=DummyLlama, llama_chat_format=fake_lcf)
+    sys.modules.setdefault("llama_cpp", fake_llama_cpp)
+    sys.modules.setdefault("llama_cpp.llama_chat_format", fake_lcf)
+
+    # Ensure test import finds MODULE_NAME (current dir or src/ if you use it)
+    sys.path.insert(0, str(Path(".").resolve()))
+    return importlib.import_module(MODULE_NAME)
+
+
+def test_build_messages_text_only():
+    app = import_app()
+    # image_path=None → should produce a simple user/text message
+    msgs = app._build_messages("hi", None, put_image_first=True)
+    assert isinstance(msgs, list) and msgs[0]["role"] == "user"
+    assert isinstance(msgs[0]["content"], str)
+    assert "hi" in msgs[0]["content"]
+
+
+def test_build_messages_with_image_makes_image_url(tmp_path):
+    app = import_app()
+    # Write a tiny "image" file and ensure we get image_url structure back
+    p = tmp_path / "fake.png"
+    p.write_bytes(b"\x89PNG\r\n\x1a\n")  # PNG header bytes; content doesn't matter
+    msgs = app._build_messages("describe", str(p), put_image_first=True)
+    content = msgs[0]["content"]
+    # First item should be an image_url dict
+    assert isinstance(content, list) and content[0]["type"] == "image_url"
+    assert content[1]["type"] == "text"
+    assert "describe" in content[1]["text"]
+
+
+def test_load_model_text_only_ok(monkeypatch, tmp_path):
+    app = import_app()
+
+    # Provide a fake model path that exists on disk (file can be empty)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"")
+
+    # Call load_model with text-only handler and a valid chat_format
+    ok, msg, desc = app.load_model(
+        model_file=str(model),
+        mmproj_file=None,
+        handler_choice="Raw text (no images)",
+        chat_format_choice="llama-3",  # from our fake registry
+        n_ctx=2048,
+        n_gpu_layers=-1,
+        verbose=False,
+    )
+
+    assert ok is True, msg
+    assert "raw text only" in desc.lower()
+    assert "chat_format: llama-3" in desc
+    # Ensure kwargs made it into DummyLlama (n_ctx, n_gpu_layers)
+    assert app.LLM is not None
+    assert app.LLM.kwargs["n_ctx"] == 2048
+    assert app.LLM.kwargs["n_gpu_layers"] == -1
+
+
+def test_generate_response_stream_accumulates_text(tmp_path):
+    app = import_app()
+
+    # Load a text-only model first
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"")
+    ok, msg, desc = app.load_model(
+        model_file=str(model),
+        mmproj_file=None,
+        handler_choice="Raw text (no images)",
+        chat_format_choice="",
+        n_ctx=1024,
+        n_gpu_layers=0,
+        verbose=False,
+    )
+    assert ok is True, msg
+
+    # Now run the streaming generator and collect the final accumulated output
+    chunks = list(app.generate_response_stream("hello", image_path=None))
+    assert chunks[-1] == "Hello world"  # combined from DummyLlama
